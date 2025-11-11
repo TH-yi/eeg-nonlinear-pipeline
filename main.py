@@ -588,7 +588,7 @@ def process(
     output_dir = output_dir or OUTPUT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    sub_files = sorted(data_dir.glob("S*.mat"))
+    sub_files = sorted(data_dir.glob("*.mat"))
     logger.info(f"Found {len(sub_files)} subjects in {data_dir}")
 
     # ---- per-subject processing ----
