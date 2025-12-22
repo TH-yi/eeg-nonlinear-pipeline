@@ -4,7 +4,6 @@ config
 features
 logger
 main
-plots
 preprocessing
 storage
 utils

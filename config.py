@@ -1,11 +1,12 @@
 from pathlib import Path
 
 TASK_MAP: dict[str, list[str]] = {
-    # "RST1": ["Sig_RST1"],
-    # "RST2": ["Sig_RST2"],
-    "IDG": ["Sig_IDG_1", "Sig_IDG_2", "Sig_IDG_3"],
-    "IDE": ["Sig_IDE_1", "Sig_IDE_2", "Sig_IDE_3"],
-    "IDR": ["Sig_IDR_1", "Sig_IDR_2", "Sig_IDR_3"],
+
+    "IDG": ["1_IDG", "2_IDG", "3_IDG"],
+    "IDE": ["1_IDE", "2_IDE", "3_IDE"],
+    "IDR": ["1_IDR", "2_IDR", "3_IDR"],
+    "RST1": ["RST1"],
+    "RST2": ["RST2"],
 
 }
 # Project root = .../eeg_pipeline_project

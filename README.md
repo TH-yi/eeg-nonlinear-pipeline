@@ -14,9 +14,8 @@ This project provides a Python re-implementation of the MATLAB `Nonlinear_Analys
 Run the pipeline from the command line using:
 
 ```bash
-python -m eeg_pipeline.main process \
-    --data-dir /path/to/mat_files \
-    --output-dir /path/to/output
+pip install -e .
+python -m eeg_pipeline.main process --data-dir /path/to/mat_files --output-dir /path/to/output
 ```
 
 You may also inspect `.mat` structures with:

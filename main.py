@@ -429,10 +429,22 @@ def _process_subject(
         # ------------------------------------------------------------------ #
         def _load_trial(k: str):
             """Load / pre-process *k* and decide MEM vs CACHE strategy."""
-            #logger.debug("%s – %s: 🔄 START loading %s", subj, task, k)
+            # logger.debug("%s – %s: 🔄 START loading %s", subj, task, k)
+
             if k not in mat_dict:
-                logger.error("%s – %s: missing %s", subj, task, k)
-                raise ValueError(f"{subj} – {task}: missing {k}")
+                # Soft match strategy: check if 'k' is a substring of any existing key in the dictionary.
+                # next() efficiently returns the first matching key or None if not found.
+                found_key = next((key for key in mat_dict if k in key), None)
+
+                if found_key:
+                    logger.warning("%s – %s: Exact key '%s' not found. Soft matched to '%s'.", subj, task, k, found_key)
+                    # Reassign 'k' to the actual key found in the dict.
+                    # This allows downstream code to continue using 'k' without changes.
+                    k = found_key
+                else:
+                    # Neither exact nor soft match found.
+                    logger.error("%s – %s: missing %s", subj, task, k)
+                    raise ValueError(f"{subj} – {task}: missing {k}")
 
             sample_size = mat_dict[k].size
             tentative_workers = safe_worker_count(sample_size, cpu_cnt, CPU_UTILIZATION_RATIO)
@@ -623,4 +635,6 @@ def process(
 
 
 if __name__ == "__main__":
+    import sys
+    sys.argv.extend(["process", "--method", "nonlinear"])
     app()
