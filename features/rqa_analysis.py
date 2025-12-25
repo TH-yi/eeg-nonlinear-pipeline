@@ -232,7 +232,7 @@ def _crqa_no_net(
     rp_cpu = rp.get() if (cp is not None and isinstance(rp, cp.ndarray)) else rp
     N_all = rp_cpu.size - (0 if theiler == 0 else
                            2 * rp_cpu.shape[0] * theiler - theiler * (theiler + 1))
-    RR = rp.sum() / N_all
+    RR = rp_cpu.sum() / N_all
     # ---------------- Parallel phase ----------------
     results = {}
 

@@ -636,5 +636,5 @@ def process(
 
 if __name__ == "__main__":
     import sys
-    sys.argv.extend(["process", "--method", "nonlinear"])
+    sys.argv.extend(["process", "--method", "rqa"])
     app()
