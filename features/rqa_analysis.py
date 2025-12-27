@@ -137,15 +137,15 @@ def _diag_line_lengths(rp: Array, lmin: int):
     else:
         # Fallback to optimized vectorized method: batch processing
         lens = []
-    for k in range(-n + 1, n):
-        if k == 0:
-            continue
-        d = xp.diag(rp, k=k)
+        for k in range(-n + 1, n):
+            if k == 0:
+                continue
+            d = xp.diag(rp, k=k)
             if d.sum() == 0:
                 continue
-        idx = xp.where(d == 1)[0]
-        if idx.size == 0:
-            continue
+            idx = xp.where(d == 1)[0]
+            if idx.size == 0:
+                continue
             # Use vectorized diff and concatenate to find consecutive segments
             diff = xp.diff(idx)
             breaks = xp.where(diff != 1)[0] + 1
@@ -155,8 +155,8 @@ def _diag_line_lengths(rp: Array, lmin: int):
             valid_lengths = lengths[lengths >= lmin]
             if valid_lengths.size > 0:
                 lens.extend(valid_lengths.tolist())
-    arr = xp.asarray(lens, dtype=_DTYPE)
-    return (arr.get() if xp is cp else arr), n
+        arr = xp.asarray(lens, dtype=_DTYPE)
+        return (arr.get() if xp is cp else arr), n
 
 @timer()
 def _vertical_line_lengths(rp: Array, vmin: int):
@@ -192,13 +192,13 @@ def _vertical_line_lengths(rp: Array, vmin: int):
     else:
         # Fallback to optimized vectorized method
         lens = []
-    for col in range(n):
+        for col in range(n):
             col_vec = rp[:, col]
             if col_vec.sum() == 0:
                 continue
             idx = xp.where(col_vec == 1)[0]
-        if idx.size == 0:
-            continue
+            if idx.size == 0:
+                continue
             # Use vectorized diff and concatenate to find consecutive segments
             diff = xp.diff(idx)
             breaks = xp.where(diff != 1)[0] + 1
@@ -208,8 +208,8 @@ def _vertical_line_lengths(rp: Array, vmin: int):
             valid_lengths = lengths[lengths >= vmin]
             if valid_lengths.size > 0:
                 lens.extend(valid_lengths.tolist())
-    arr = xp.asarray(lens, dtype=_DTYPE)
-    return arr.get() if xp is cp else arr
+        arr = xp.asarray(lens, dtype=_DTYPE)
+        return arr.get() if xp is cp else arr
 
 @timer()
 def _white_vertical_lengths(rp: Array):
@@ -244,13 +244,13 @@ def _white_vertical_lengths(rp: Array):
     else:
         # Fallback to optimized vectorized method
         lens = []
-    for col in range(n):
+        for col in range(n):
             col_vec = rp_w[:, col]
             if col_vec.sum() == 0:
                 continue
             idx = xp.where(col_vec == 1)[0]
-        if idx.size == 0:
-            continue
+            if idx.size == 0:
+                continue
             # Use vectorized diff to find consecutive segments
             diff = xp.diff(idx)
             breaks = xp.where(diff != 1)[0] + 1
@@ -259,8 +259,8 @@ def _white_vertical_lengths(rp: Array):
             lengths = ends - starts
             if lengths.size > 0:
                 lens.extend(lengths.tolist())
-    arr = xp.asarray(lens, dtype=_DTYPE)
-    return arr.get() if xp is cp else arr
+        arr = xp.asarray(lens, dtype=_DTYPE)
+        return arr.get() if xp is cp else arr
 
 @timer()
 def _recurrence_times(rp: Array) -> Tuple[float, float]:
