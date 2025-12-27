@@ -1,12 +1,12 @@
 from pathlib import Path
 
 TASK_MAP: dict[str, list[str]] = {
-
+    "RST1": ["RST1"],
+    "RST2": ["RST2"],
     "IDG": ["1_IDG", "2_IDG", "3_IDG"],
     "IDE": ["1_IDE", "2_IDE", "3_IDE"],
     "IDR": ["1_IDR", "2_IDR", "3_IDR"],
-    "RST1": ["RST1"],
-    "RST2": ["RST2"],
+
 
 }
 # Project root = .../eeg_pipeline_project
@@ -31,4 +31,4 @@ PARALLEL_TASK_COUNT = 3
 MAX_WORKER_MEMORY_LIMIT = 0.001 # Minimum memory required per worker (unit depends on implementation)
 
 # CPU utilization ratio (used in functions like safe_worker_count)
-CPU_UTILIZATION_RATIO = 0.001  # Used to estimate safe_worker_count
+CPU_UTILIZATION_RATIO = 0.0012  # Used to estimate safe_worker_count
