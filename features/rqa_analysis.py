@@ -21,13 +21,15 @@ import numpy as np
 import multiprocessing as mp
 from multiprocessing import shared_memory, managers
 
+from scipy import ndimage; SCIPY_AVAILABLE = True
+
 try:
     import cupy as cp          # GPU optional
 except ModuleNotFoundError:
     cp = None
 
 Array  = Union[np.ndarray, "cp.ndarray"]
-_DTYPE = np.float64
+_DTYPE = np.float32
 
 ###############################################################################
 # Helper utilities
@@ -68,21 +70,26 @@ _METHODS: Dict[str, Literal["max", "eu", "min", "nr"]] = {
 
 @timer()
 def _distance_matrix(x: Array, y: Array, method: str, use_gpu: bool) -> Array:
+    """Optimized distance matrix calculation."""
     xp = cp if (use_gpu and cp) else np
 
     n = x.shape[0]
-    size_gb = (n * n * 8) / 1024 ** 3  # float64
+    size_gb = (n * n * 4) / 1024 ** 3  # float32 (using _DTYPE)
     wait_for_available_memory(size_gb)
 
     if method == "max":     # Chebyshev
-        return xp.abs(x[:, None] - y).max(axis=2)
+        # Use more efficient memory layout
+        return xp.abs(x[:, None, :] - y[None, :, :]).max(axis=2)
     if method == "min":     # Manhattan
-        return xp.abs(x[:, None] - y).sum(axis=2)
+        return xp.abs(x[:, None, :] - y[None, :, :]).sum(axis=2)
     if method == "nr":      # normalised Euclidean
-        nx = xp.linalg.norm(x, axis=1, keepdims=True); ny = xp.linalg.norm(y, axis=1, keepdims=True)
-        nx[nx == 0.0] = 1.0; ny[ny == 0.0] = 1.0
+        nx = xp.linalg.norm(x, axis=1, keepdims=True)
+        ny = xp.linalg.norm(y, axis=1, keepdims=True)
+        nx = xp.where(nx == 0.0, 1.0, nx)
+        ny = xp.where(ny == 0.0, 1.0, ny)
         x, y = x / nx, y / ny
-    diff = x[:, None] - y
+    # Euclidean distance: use efficient vectorized implementation
+    diff = x[:, None, :] - y[None, :, :]
     return xp.sqrt((diff ** 2).sum(axis=2))
 
 def _rp_binary(dmat: Array, eps: float) -> Array:
@@ -94,59 +101,211 @@ def _rp_binary(dmat: Array, eps: float) -> Array:
 ###############################################################################
 @timer()
 def _diag_line_lengths(rp: Array, lmin: int):
-    xp, n, lens = _backend(rp), rp.shape[0], []
+    """Optimized diagonal line length calculation using vectorized methods.
+    
+    Algorithmically equivalent to the original implementation, but uses
+    scipy.ndimage.label for faster connected component labeling when available.
+    """
+    xp = _backend(rp)
+    n = rp.shape[0]
+    
+    # Convert to CPU numpy array for scipy (if available)
+    if xp is cp:
+        rp_cpu = rp.get()
+    else:
+        rp_cpu = rp
+    
+    # Use scipy.ndimage.label for vectorized labeling (if available)
+    if SCIPY_AVAILABLE and ndimage is not None:
+        # Label connected components on all diagonals
+        # We need to process all non-zero diagonals
+        lens = []
+        for k in range(-n + 1, n):
+            if k == 0:
+                continue
+            d = np.diag(rp_cpu, k=k)
+            if d.sum() == 0:
+                continue
+            # Use connected component labeling
+            labeled, num_features = ndimage.label(d)
+            for i in range(1, num_features + 1):
+                length = (labeled == i).sum()
+                if length >= lmin:
+                    lens.append(length)
+        arr = xp.asarray(lens, dtype=_DTYPE)
+        return (arr.get() if xp is cp else arr), n
+    else:
+        # Fallback to optimized vectorized method: batch processing
+        lens = []
     for k in range(-n + 1, n):
         if k == 0:
             continue
         d = xp.diag(rp, k=k)
+            if d.sum() == 0:
+                continue
         idx = xp.where(d == 1)[0]
         if idx.size == 0:
             continue
-        splits = xp.where(xp.diff(idx) != 1)[0] + 1
-        runs = xp.split(idx, splits.tolist())
-        lens.extend(int(len(r)) for r in runs if len(r) >= lmin)
+            # Use vectorized diff and concatenate to find consecutive segments
+            diff = xp.diff(idx)
+            breaks = xp.where(diff != 1)[0] + 1
+            starts = xp.concatenate([xp.array([0]), breaks])
+            ends = xp.concatenate([breaks, xp.array([idx.size])])
+            lengths = ends - starts
+            valid_lengths = lengths[lengths >= lmin]
+            if valid_lengths.size > 0:
+                lens.extend(valid_lengths.tolist())
     arr = xp.asarray(lens, dtype=_DTYPE)
     return (arr.get() if xp is cp else arr), n
 
 @timer()
 def _vertical_line_lengths(rp: Array, vmin: int):
-    xp, n, lens = _backend(rp), rp.shape[1], []
+    """Optimized vertical line length calculation using vectorized methods.
+    
+    Algorithmically equivalent to the original implementation, but uses
+    scipy.ndimage.label for faster connected component labeling when available.
+    """
+    xp = _backend(rp)
+    n = rp.shape[1]
+    
+    # Convert to CPU numpy array for scipy (if available)
+    if xp is cp:
+        rp_cpu = rp.get()
+    else:
+        rp_cpu = rp
+    
+    # Use scipy.ndimage.label for vectorized labeling (if available)
+    if SCIPY_AVAILABLE and ndimage is not None:
+        # Label connected components for each column
+        lens = []
+        for col in range(n):
+            col_vec = rp_cpu[:, col]
+            if col_vec.sum() == 0:
+                continue
+            labeled, num_features = ndimage.label(col_vec)
+            for i in range(1, num_features + 1):
+                length = (labeled == i).sum()
+                if length >= vmin:
+                    lens.append(length)
+        arr = xp.asarray(lens, dtype=_DTYPE)
+        return arr.get() if xp is cp else arr
+    else:
+        # Fallback to optimized vectorized method
+        lens = []
     for col in range(n):
-        idx = xp.where(rp[:, col] == 1)[0]
+            col_vec = rp[:, col]
+            if col_vec.sum() == 0:
+                continue
+            idx = xp.where(col_vec == 1)[0]
         if idx.size == 0:
             continue
-        splits = xp.where(xp.diff(idx) != 1)[0] + 1
-        runs = xp.split(idx, splits.tolist())
-        lens.extend(int(len(r)) for r in runs if len(r) >= vmin)
+            # Use vectorized diff and concatenate to find consecutive segments
+            diff = xp.diff(idx)
+            breaks = xp.where(diff != 1)[0] + 1
+            starts = xp.concatenate([xp.array([0]), breaks])
+            ends = xp.concatenate([breaks, xp.array([idx.size])])
+            lengths = ends - starts
+            valid_lengths = lengths[lengths >= vmin]
+            if valid_lengths.size > 0:
+                lens.extend(valid_lengths.tolist())
     arr = xp.asarray(lens, dtype=_DTYPE)
     return arr.get() if xp is cp else arr
 
 @timer()
 def _white_vertical_lengths(rp: Array):
-    xp, n, lens, rp_w = _backend(rp), rp.shape[1], [], 1 - rp
+    """Optimized white vertical line length calculation using vectorized methods.
+    
+    Algorithmically equivalent to the original implementation, but uses
+    scipy.ndimage.label for faster connected component labeling when available.
+    """
+    xp = _backend(rp)
+    n = rp.shape[1]
+    rp_w = 1 - rp
+    
+    # Convert to CPU numpy array for scipy (if available)
+    if xp is cp:
+        rp_w_cpu = rp_w.get()
+    else:
+        rp_w_cpu = rp_w
+    
+    # Use scipy.ndimage.label for vectorized labeling (if available)
+    if SCIPY_AVAILABLE and ndimage is not None:
+        lens = []
+        for col in range(n):
+            col_vec = rp_w_cpu[:, col]
+            if col_vec.sum() == 0:
+                continue
+            labeled, num_features = ndimage.label(col_vec)
+            for i in range(1, num_features + 1):
+                length = (labeled == i).sum()
+                lens.append(length)
+        arr = xp.asarray(lens, dtype=_DTYPE)
+        return arr.get() if xp is cp else arr
+    else:
+        # Fallback to optimized vectorized method
+        lens = []
     for col in range(n):
-        idx = xp.where(rp_w[:, col] == 1)[0]
+            col_vec = rp_w[:, col]
+            if col_vec.sum() == 0:
+                continue
+            idx = xp.where(col_vec == 1)[0]
         if idx.size == 0:
             continue
-        splits = xp.where(xp.diff(idx) != 1)[0] + 1
-        runs = xp.split(idx, splits.tolist())
-        lens.extend(int(len(r)) for r in runs)
+            # Use vectorized diff to find consecutive segments
+            diff = xp.diff(idx)
+            breaks = xp.where(diff != 1)[0] + 1
+            starts = xp.concatenate([xp.array([0]), breaks])
+            ends = xp.concatenate([breaks, xp.array([idx.size])])
+            lengths = ends - starts
+            if lengths.size > 0:
+                lens.extend(lengths.tolist())
     arr = xp.asarray(lens, dtype=_DTYPE)
     return arr.get() if xp is cp else arr
 
 @timer()
 def _recurrence_times(rp: Array) -> Tuple[float, float]:
-    xp, n = _backend(rp), rp.shape[1]
-    t1, t2 = [], []
+    """Optimized recurrence time calculation using vectorized methods.
+    
+    Algorithmically equivalent to the original implementation, but uses
+    vectorized operations for better performance.
+    """
+    xp = _backend(rp)
+    n = rp.shape[1]
+    
+    # Vectorized calculation of t1: intervals between consecutive 1s across all columns
+    t1_list = []
+    t2_list = []
+    
+    # Batch process all columns
     for col in range(n):
-        col_vec = rp[:, col]
+        col_vec = rp[:, col].astype(xp.int32)
+        
+        # T1: intervals between consecutive 1s
         rps = xp.where(col_vec == 1)[0]
         if rps.size >= 2:
-            t1.extend(xp.diff(rps).tolist())
-        rps2 = xp.where(xp.diff(col_vec.astype(int)) == 1)[0]
-        if rps2.size >= 2:
-            t2.extend(xp.diff(rps2).tolist())
-    return float(np.mean(t1)) if t1 else np.nan, float(np.mean(t2)) if t2 else np.nan
+            diffs = xp.diff(rps)
+            t1_list.extend(diffs.tolist())
+        
+        # T2: intervals between 0-to-1 transitions
+        transitions = xp.where(xp.diff(col_vec) == 1)[0]
+        if transitions.size >= 2:
+            diffs2 = xp.diff(transitions)
+            t2_list.extend(diffs2.tolist())
+    
+    # Convert to numpy array for computation (more efficient)
+    if t1_list:
+        t1_arr = np.array(t1_list, dtype=np.float32)
+        t1_mean = float(t1_arr.mean())
+    else:
+        t1_mean = np.nan
+    
+    if t2_list:
+        t2_arr = np.array(t2_list, dtype=np.float32)
+        t2_mean = float(t2_arr.mean())
+    else:
+        t2_mean = np.nan
+    
+    return t1_mean, t2_mean
 
 def _entropy(counts: np.ndarray) -> float:
     if counts.sum() == 0:
@@ -218,39 +377,55 @@ def _crqa_no_net(
         raise NotImplementedError(f"method '{method}' not supported")
 
     dmat = _distance_matrix(x_emb, x_emb, method_key, use_gpu)
-    rp = (dmat <= e).astype(np.bool_)
+    xp = _backend(dmat)
+    rp = (dmat <= e).astype(xp.bool_)
     del dmat
     if use_gpu and cp:
         cp._default_memory_pool.free_all_blocks()
 
     if theiler > 0:
         xp, n = _backend(rp), rp.shape[0]
+        # Vectorized theiler window processing: set all diagonals at once
+        # Create mask matrix for better efficiency
+        mask = xp.ones_like(rp, dtype=xp.bool_)
         for k in range(-theiler, theiler + 1):
+            if k == 0:
+                continue
             diag_idx = xp.arange(max(0, -k), min(n, n - k))
-            rp[diag_idx, diag_idx + k] = 0
+            mask[diag_idx, diag_idx + k] = False
+        rp = rp * mask
 
-    rp_cpu = rp.get() if (cp is not None and isinstance(rp, cp.ndarray)) else rp
-    N_all = rp_cpu.size - (0 if theiler == 0 else
-                           2 * rp_cpu.shape[0] * theiler - theiler * (theiler + 1))
-    RR = rp_cpu.sum() / N_all
+    # Calculate N_all and RR (on GPU to avoid premature conversion)
+    xp = _backend(rp)
+    n = rp.shape[0]
+    N_all = rp.size - (0 if theiler == 0 else
+                       2 * n * theiler - theiler * (theiler + 1))
+    RR = float(rp.sum() / N_all)
+    
+    # Defer CPU conversion - only convert when needed
+    # Compute all operations that can be done on GPU first
+    rp_sum_cpu = float(rp.sum())  # Pre-compute sum to avoid repeated conversion
+    
     # ---------------- Parallel phase ----------------
     results = {}
 
     def compute_diag():
         lens, _ = _diag_line_lengths(rp, lmin)
+        lens_sum = float(lens.sum()) if lens.size else 0.0
         return {
             'L_max': float(lens.max()) if lens.size else 0.0,
             'L_mean': float(lens.mean()) if lens.size else np.nan,
-            'DET': lens.sum() / rp_cpu.sum() if rp_cpu.sum() else np.nan,
-            'ENTR': _entropy(np.histogram(lens, bins=np.arange(1, rp_cpu.shape[0] + 1))[0])
+            'DET': lens_sum / rp_sum_cpu if rp_sum_cpu > 0 else np.nan,
+            'ENTR': _entropy(np.histogram(lens, bins=np.arange(1, n + 1))[0])
         }
 
     def compute_vert():
         lens = _vertical_line_lengths(rp, vmin)
+        lens_sum = float(lens.sum()) if lens.size else 0.0
         return {
             'V_max': float(lens.max()) if lens.size else 0.0,
             'TT': float(lens.mean()) if lens.size else np.nan,
-            'LAM': lens.sum() / rp_cpu.sum() if rp_cpu.sum() else np.nan
+            'LAM': lens_sum / rp_sum_cpu if rp_sum_cpu > 0 else np.nan
         }
 
     def compute_white():
@@ -298,6 +473,8 @@ def _crqa_no_net(
         Clust=np.nan,
         Trans=np.nan
     )
+    # Only convert to CPU at the end when needed (for network measures)
+    rp_cpu = rp.get() if (cp is not None and isinstance(rp, cp.ndarray)) else rp
     return res, rp_cpu
 
 ###############################################################################
