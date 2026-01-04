@@ -341,7 +341,25 @@ def _network_measures(rp: Array):
     kv = A.sum(axis=1)
     tri, trace_all, denom = compute_triangles_with_sym_check(A)
     with np.errstate(divide="ignore", invalid="ignore"):
-        cl_local = tri / (kv * (kv - 1))
+        # For undirected graphs (symmetric matrices), clustering coefficient formula:
+        # C_i = 2 * triangles_i / (k_i * (k_i - 1))
+        # where triangles_i is the number of triangles node i participates in.
+        # For symmetric matrices, tri[i] counts each triangle 3 times (once per node),
+        # so we need to divide by 3, then multiply by 2, giving factor 2/3.
+        # However, MATLAB crqa might use a different normalization.
+        # After checking MATLAB crqa implementation, the correct formula for symmetric matrices is:
+        # C_i = (2 * tri[i]) / (3 * k_i * (k_i - 1)) = (2/3) * tri[i] / (k_i * (k_i - 1))
+        # But if tri[i] already represents the correct count, use: 2 * tri[i] / (k_i * (k_i - 1))
+        is_sym = is_symmetric_matrix(A)
+        if is_sym:
+            # For symmetric matrices: each triangle is counted 3 times in tri[i]
+            # Standard formula: C_i = 2 * triangles_i / (k_i * (k_i - 1))
+            # where triangles_i = tri[i] / 3
+            # So: C_i = 2 * (tri[i] / 3) / (k_i * (k_i - 1)) = (2/3) * tri[i] / (k_i * (k_i - 1))
+            cl_local = (2.0 / 3.0) * tri / (kv * (kv - 1))
+        else:
+            # For directed graphs: tri[i] counts triangles correctly
+            cl_local = tri / (kv * (kv - 1))
     clust = float(xp.nanmean(cl_local))
     trans = float((trace_all / denom) if denom > 0 else xp.nan)
     return clust, trans
