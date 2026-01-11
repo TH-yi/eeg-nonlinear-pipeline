@@ -20,6 +20,9 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 import numpy as np
 import multiprocessing as mp
 from multiprocessing import shared_memory, managers
+import json
+import os
+import time
 
 from scipy import ndimage; SCIPY_AVAILABLE = True
 
@@ -336,10 +339,39 @@ def compute_triangles_with_sym_check(A: Array):
     return tri, float(xp.einsum("ij,jk,ki->", A, A, A)), float((A @ A).sum())
 
 def _network_measures(rp: Array):
+    # #region agent log
+    log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.cursor', 'debug.log')
+    try:
+        rp_shape = rp.shape if hasattr(rp, 'shape') else 'unknown'
+        rp_sum = float(rp.sum()) if hasattr(rp, 'sum') else 'unknown'
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "rqa_analysis.py:338", "message": "_network_measures entry", "data": {"rp_shape": str(rp_shape), "rp_sum": rp_sum}, "timestamp": int(time.time() * 1000)}) + '\n')
+    except: pass
+    # #endregion
     xp = _backend(rp)
     A = rp.astype(int, copy=False)
     kv = A.sum(axis=1)
+    # #region agent log
+    try:
+        kv_cpu = kv.get() if hasattr(kv, 'get') else kv
+        kv_min, kv_max = float(kv_cpu.min()), float(kv_cpu.max())
+        kv_zero_count = int((kv_cpu == 0).sum())
+        kv_one_count = int((kv_cpu == 1).sum())
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "rqa_analysis.py:341", "message": "degrees computed", "data": {"kv_min": kv_min, "kv_max": kv_max, "kv_zero_count": kv_zero_count, "kv_one_count": kv_one_count}, "timestamp": int(time.time() * 1000)}) + '\n')
+    except: pass
+    # #endregion
     tri, trace_all, denom = compute_triangles_with_sym_check(A)
+    # #region agent log
+    try:
+        tri_cpu = tri.get() if hasattr(tri, 'get') else tri
+        tri_min, tri_max = float(tri_cpu.min()), float(tri_cpu.max())
+        tri_neg_count = int((tri_cpu < 0).sum())
+        is_sym = is_symmetric_matrix(A)
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "rqa_analysis.py:342", "message": "triangles computed", "data": {"tri_min": tri_min, "tri_max": tri_max, "tri_neg_count": tri_neg_count, "is_symmetric": is_sym, "trace_all": trace_all, "denom": denom}, "timestamp": int(time.time() * 1000)}) + '\n')
+    except: pass
+    # #endregion
     with np.errstate(divide="ignore", invalid="ignore"):
         # Clustering coefficient formula (aligned with MATLAB crqa):
         # C_i = 2 * edges_in_neighborhood_i / (k_i * (k_i - 1))
@@ -353,8 +385,50 @@ def _network_measures(rp: Array):
         #
         # MATLAB crqa uses: cl = tri / (k * (k - 1))
         # Python now aligns with this standard implementation.
-        cl_local = tri / (kv * (kv - 1))
+        kv_cpu = kv.get() if hasattr(kv, 'get') else kv
+        tri_cpu = tri.get() if hasattr(tri, 'get') else tri
+        denominator = kv_cpu * (kv_cpu - 1)
+        # #region agent log
+        try:
+            denom_zero_count = int((denominator == 0).sum())
+            denom_min = float(denominator.min())
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "rqa_analysis.py:356", "message": "before division", "data": {"denominator_zero_count": denom_zero_count, "denominator_min": denom_min}, "timestamp": int(time.time() * 1000)}) + '\n')
+        except: pass
+        # #endregion
+        # Fix: For nodes with degree 0 or 1, clustering coefficient is 0 (cannot form triangles)
+        # This prevents division by zero and matches MATLAB crqa behavior
+        cl_local = np.where(denominator > 0, tri_cpu / denominator, 0.0)
+        # #region agent log
+        try:
+            cl_local_inf_count = int(np.isinf(cl_local).sum())
+            cl_local_nan_count = int(np.isnan(cl_local).sum())
+            cl_local_finite = cl_local[np.isfinite(cl_local)]
+            cl_local_min = float(cl_local_finite.min()) if cl_local_finite.size > 0 else None
+            cl_local_max = float(cl_local_finite.max()) if cl_local_finite.size > 0 else None
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "rqa_analysis.py:357", "message": "after division", "data": {"cl_local_inf_count": cl_local_inf_count, "cl_local_nan_count": cl_local_nan_count, "cl_local_min": cl_local_min, "cl_local_max": cl_local_max}, "timestamp": int(time.time() * 1000)}) + '\n')
+        except: pass
+        # #endregion
+        cl_local = xp.asarray(cl_local, dtype=_DTYPE) if xp is cp else np.asarray(cl_local, dtype=_DTYPE)
+    # #region agent log
+    try:
+        cl_local_for_log = cl_local.get() if hasattr(cl_local, 'get') else cl_local
+        clust_before_nanmean = float(np.nanmean(cl_local_for_log))
+        cl_local_finite_for_log = cl_local_for_log[np.isfinite(cl_local_for_log)]
+        clust_using_mean = float(np.mean(cl_local_finite_for_log)) if cl_local_finite_for_log.size > 0 else None
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "rqa_analysis.py:357", "message": "before nanmean", "data": {"clust_before_nanmean": clust_before_nanmean, "clust_using_mean": clust_using_mean}, "timestamp": int(time.time() * 1000)}) + '\n')
+    except: pass
+    # #endregion
     clust = float(xp.nanmean(cl_local))
+    # #region agent log
+    try:
+        is_inf = np.isinf(clust) or np.isnan(clust)
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "rqa_analysis.py:357", "message": "_network_measures exit", "data": {"clust": clust, "is_inf_or_nan": is_inf, "trans": float((trace_all / denom) if denom > 0 else xp.nan)}, "timestamp": int(time.time() * 1000)}) + '\n')
+    except: pass
+    # #endregion
     trans = float((trace_all / denom) if denom > 0 else xp.nan)
     return clust, trans
 
