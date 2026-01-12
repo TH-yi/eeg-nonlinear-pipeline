@@ -3,13 +3,15 @@ import os
 import logging
 import time
 import psutil
-
+DEBUG=False
 
 def safe_worker_count(
     bytes_per_job: int,
     max_cpu: int | None = None,
     safety_ratio: float = 0.002,
 ) -> int:
+    if DEBUG:
+        return 1
     max_cpu = max_cpu or os.cpu_count() or 1
 
     if psutil is None:
@@ -45,6 +47,8 @@ def memory_limited_worker_count(
     int
         Theoretical max number of workers constrained only by memory.
     """
+    if DEBUG:
+        return 1
     if psutil is None:
         raise RuntimeError("psutil is required to estimate memory usage.")
 
@@ -66,6 +70,8 @@ def compute_max_threads(memory_limited_workers: int, max_workers: int, parallel_
     -------
     (max_threads_for_features_per_channel, adjusted_max_workers)
     """
+    if DEBUG:
+        return 1, 1
     if not memory_limited_workers or memory_limited_workers < max_workers:
         return 1, max_workers
 
@@ -93,6 +99,8 @@ def wait_for_available_memory(request_size_gb: float, safety_factor: float = 1.2
     - check_interval: seconds between checks
     - max_wait: timeout in seconds (raise RuntimeError if exceeded)
     """
+    if DEBUG:
+        return 1
     required = request_size_gb * safety_factor * 1024 ** 3
     waited = 0.0
     while psutil.virtual_memory().available < required:
