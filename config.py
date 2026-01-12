@@ -28,7 +28,7 @@ EMB_DIM = 2
 PARALLEL_TASK_COUNT = 3
 
 # Memory limit threshold (adjust based on empirical observations)
-MAX_WORKER_MEMORY_LIMIT = 0.001 # Minimum memory required per worker (unit depends on implementation)
+MAX_WORKER_MEMORY_LIMIT = 0.01 # Minimum memory required per worker (unit depends on implementation)
 
 # CPU utilization ratio (used in functions like safe_worker_count)
-CPU_UTILIZATION_RATIO = 0.0012  # Used to estimate safe_worker_count
+CPU_UTILIZATION_RATIO = 0.01  # Used to estimate safe_worker_count
