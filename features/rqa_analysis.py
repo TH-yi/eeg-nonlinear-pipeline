@@ -77,7 +77,7 @@ def _distance_matrix(x: Array, y: Array, method: str, use_gpu: bool) -> Array:
     xp = cp if (use_gpu and cp) else np
 
     n = x.shape[0]
-    size_gb = (n * n * 4) / 1024 ** 3  # float32 (using _DTYPE)
+    size_gb = 2* (n * n * 4) / 1024 ** 3  # float32 (using _DTYPE)
     wait_for_available_memory(size_gb)
 
     if method == "max":     # Chebyshev
