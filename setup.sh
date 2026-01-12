@@ -33,7 +33,7 @@ sudo apt-get install -y \
     python3.11-dev \
     python3-pip \
     python3.11-venv \
-    libopencl-dev \
+     \
     ocl-icd-opencl-dev \
     opencl-headers \
     rclone \

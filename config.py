@@ -1,11 +1,13 @@
 from pathlib import Path
 
 TASK_MAP: dict[str, list[str]] = {
+  
     "RST1": ["RST1"],
     "RST2": ["RST2"],
     "IDG": ["1_IDG", "2_IDG", "3_IDG"],
     "IDE": ["1_IDE", "2_IDE", "3_IDE"],
     "IDR": ["1_IDR", "2_IDR", "3_IDR"],
+
 
 
 }
@@ -28,7 +30,7 @@ EMB_DIM = 2
 PARALLEL_TASK_COUNT = 3
 
 # Memory limit threshold (adjust based on empirical observations)
-MAX_WORKER_MEMORY_LIMIT = 0.01 # Minimum memory required per worker (unit depends on implementation)
+MAX_WORKER_MEMORY_LIMIT = 0.0001 # Minimum memory required per worker (unit depends on implementation)
 
 # CPU utilization ratio (used in functions like safe_worker_count)
-CPU_UTILIZATION_RATIO = 0.01  # Used to estimate safe_worker_count
+CPU_UTILIZATION_RATIO = 0.0002  # Used to estimate safe_worker_count

@@ -566,15 +566,14 @@ def _crqa_no_net(
 ###############################################################################
 # ----------------------  GPU worker process  --------------------------- ###
 ###############################################################################
-def _gpu_worker(task_q: managers.QueueProxy,
-                result_q: managers.QueueProxy,
-                device_id: int = 0):
-    """GPU process: fetch RP from shared memory, compute network measures."""
-    if cp is None:
-        result_q.put(("ERROR", "CuPy not available"))
+def _gpu_worker(task_q, result_q, device_id=0):
+    try:
+        import cupy as cp
+        cp.cuda.Device(device_id).use()
+    except Exception as e:
+        # GPU 不可用 → 广播关闭
+        result_q.put(("__GPU_INIT_FAILED__", repr(e)))
         return
-
-    cp.cuda.Device(device_id).use()
 
     while True:
         try:
@@ -585,38 +584,31 @@ def _gpu_worker(task_q: managers.QueueProxy,
         if job == "STOP":
             break
 
-        try:
-            qlen = task_q.qsize()
-        except (AttributeError, NotImplementedError):
-            qlen = "N/A"
-        #print(f"[GPU Worker] got job, pending: {qlen}")
-
         job_id, shm_name, shape, dtype_str = job
         try:
             shm = shared_memory.SharedMemory(name=shm_name)
             rp_np = np.ndarray(shape, dtype=np.dtype(dtype_str), buffer=shm.buf)
 
-            # Estimate GPU memory usage
+            # 显存判断
             required_bytes = rp_np.nbytes
             if not wait_for_available_gpu_memory(required_bytes):
-                raise MemoryError(f"Not enough GPU memory for {job_id}, needs {required_bytes / 1024 ** 2:.2f} MB")
+                result_q.put((job_id, "CPU_FALLBACK", None))
+                continue
 
-            rp_gpu = cp.asarray(rp_np)  # H→D zero-copy
+            rp_gpu = cp.asarray(rp_np)
             clust, trans = _network_measures(rp_gpu)
-            del rp_np
-            del rp_gpu
-            cp._default_memory_pool.free_all_blocks()
+
             result_q.put((job_id, clust, trans))
-        except Exception as exc:
-            result_q.put((job_id, "ERROR", repr(exc)))
-            raise
+
+        except Exception as e:
+            result_q.put((job_id, "CPU_FALLBACK", repr(e)))
         finally:
-            shm.close()
-        try:
-            qlen = task_q.qsize()
-        except (AttributeError, NotImplementedError):
-            qlen = "N/A"
-        #print(f"[GPU Worker] finished job, pending: {qlen}")
+            try:
+                shm.close()
+            except:
+                pass
+            if cp:
+                cp._default_memory_pool.free_all_blocks()
 
 ###############################################################################
 # CPU-side worker (process) that offloads network part ------------------- ###
@@ -645,10 +637,15 @@ def _cpu_rqa_worker(
             while True:
                 jid, *data = result_q.get()
                 if jid == job_id:
-                    if data[0] == "ERROR":
-                        raise RuntimeError(f"GPU worker error: {data[1]}")
-                    clust, trans = data
+                    if data[0] == "CPU_FALLBACK":
+                        # 🔁 自动切 CPU
+                        clust, trans = _network_measures(rp)
+                    elif data[0] == "ERROR":
+                        raise RuntimeError(data[1])
+                    else:
+                        clust, trans = data
                     break
+
             shm.unlink()
 
         result = res_base.as_array()
@@ -706,7 +703,19 @@ def rqa_analysis(
                           args=(task_q, result_q, 0),
                           daemon=True)
     gpu_proc.start()
+    gpu_available = use_gpu and cp is not None
 
+    try:
+        status = result_q.get(timeout=3)
+        if status[0] == "__GPU_INIT_FAILED__":
+            warnings.warn(f"GPU disabled: {status[1]}")
+            gpu_available = False
+    except _pyqueue.Empty:
+        pass
+
+    if not gpu_available:
+        task_q = None
+        result_q = None
     with ProcessPoolExecutor(max_workers=cpu_workers,
                              mp_context=mp.get_context('spawn')) as ex:
         futures = [ex.submit(_cpu_rqa_worker,

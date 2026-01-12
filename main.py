@@ -14,6 +14,7 @@ import tempfile, uuid, os, json
 from itertools import count
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, Future
 import multiprocessing as mp
+mp.set_start_method("spawn", force=True)
 import logging
 from typing import List, Dict
 
