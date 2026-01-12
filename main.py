@@ -118,7 +118,8 @@ def analyze_segment(
     cache_dir=None,
     on_almost_done: callable | None = None,
     channel_threshold: int = 1,
-    method: str = None
+    method: str = None,
+    use_gpu: bool=True
 ):
     """Extract nonlinear features for a single segment.
 
@@ -178,6 +179,7 @@ def analyze_segment(
                     cache_dir=cache_dir,
                     on_almost_done_channels=on_almost_done,
                     channel_threshold=channel_threshold,
+                    use_gpu=use_gpu
                 )
             elif method == "nonlinear":
                 logger.info(f"Start nonlinear analysis: {subj}-{task}-{trial} Segment {int(seg_id)+1}")
@@ -219,6 +221,7 @@ def _process_subject(
     output_dir: Path,
     save_mat: bool = True,
     method: str = None,
+    use_gpu: str = True
 ) -> str:
     """One *.mat* in → nonlinear features out (JSON + optional MAT).
 
@@ -286,6 +289,7 @@ def _process_subject(
             # ───────────── new optional arguments ──────────────────────────
             preload_next_trial_cb: callable | None = None,
             channel_threshold: int = 1,
+            use_gpu: bool=True
     ) -> np.ndarray | None:
         """
         Compute the *mean* 17-dim feature vector for a single *trial*.
@@ -387,6 +391,7 @@ def _process_subject(
                     # -------------- propagate callback & threshold --------------
                     on_almost_done=cb,
                     channel_threshold=chan_thresh,
+                    use_gpu=use_gpu
                 )
 
                 if ok:
@@ -507,6 +512,7 @@ def _process_subject(
                 max_workers=max_wkr,
                 preload_next_trial_cb=_kickoff_preload,
                 channel_threshold=max(1, max_wkr - 1),
+                use_gpu=use_gpu
             )
             if vec is not None:
                 trial_vecs.append(vec)
@@ -580,6 +586,7 @@ def process(
         help="Feature extraction method (choose one): 'rqa' or 'nonlinear' ",
     ),
     save_mat: bool = typer.Option(True, "--save-mat", help="Also save <subj>_NL_Results.mat files"),
+    use_gpu: bool = typer.Option(True, "--use-gpu", help="Use GPU calc"),
 ) -> None:
     # ---- validate method ----
     if not method:
@@ -606,7 +613,7 @@ def process(
     # ---- per-subject processing ----
     for f in sub_files:
         _process_subject(
-            f, fs, tau, lag, emb_dim, TASK_MAP, output_dir, save_mat, method=method_norm
+            f, fs, tau, lag, emb_dim, TASK_MAP, output_dir, save_mat, method=method_norm, use_gpu=use_gpu
         )
 
     logger.info("✅ All subjects finished.")
