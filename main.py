@@ -459,7 +459,7 @@ def _process_subject(
             max_threads_per_ch, tentative_workers = compute_max_threads(
                 mem_workers, tentative_workers, PARALLEL_TASK_COUNT
             )
-
+            #tentative_workers = 6 if tentative_workers>6 else tentative_workers
             logger.info(
                 "%s – %s – %s → %s (max_threads_per_channel=%d, max_workers=%d)",
                 subj, task, k,
@@ -586,7 +586,11 @@ def process(
         help="Feature extraction method (choose one): 'rqa' or 'nonlinear' ",
     ),
     save_mat: bool = typer.Option(True, "--save-mat", help="Also save <subj>_NL_Results.mat files"),
-    use_gpu: bool = typer.Option(True, "--use-gpu", help="Use GPU calc"),
+    use_gpu: bool = typer.Option(
+        True,
+        "--use-gpu/--no-use-gpu",
+        help="Use GPU calc"
+    )
 ) -> None:
     # ---- validate method ----
     if not method:
